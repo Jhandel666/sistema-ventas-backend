@@ -1,14 +1,15 @@
 const pool = require("../db");
 
 const registrarVenta = async (req, res) => {
-  const connection = await pool.getConnection();
+  const client = await pool.connect();
 
   try {
-    await connection.beginTransaction();
+    await client.query("BEGIN");
 
     const { cliente, carrito, metodo_pago } = req.body;
 
     if (!cliente || !Array.isArray(carrito) || carrito.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(400).json({
         ok: false,
         msg: "Datos incompletos: cliente y carrito son obligatorios"
@@ -23,20 +24,23 @@ const registrarVenta = async (req, res) => {
     ];
 
     if (camposCliente.some((campo) => !campo || String(campo).trim() === "")) {
+      await client.query("ROLLBACK");
       return res.status(400).json({
         ok: false,
         msg: "Completa todos los datos del cliente"
       });
     }
 
-    const [clienteResult] = await connection.query(
+    const clienteResult = await client.query(
       `INSERT INTO clientes
       (nombres, apellidos, direccion, telefono)
-      VALUES (?, ?, ?, ?)`,
+      VALUES ($1, $2, $3, $4)
+      RETURNING id_cliente`,
       camposCliente.map((campo) => String(campo).trim())
     );
 
-    const idCliente = clienteResult.insertId;
+    const idCliente = clienteResult.rows[0].id_cliente;
+
     let totalCalculado = 0;
     const detalles = [];
 
@@ -47,16 +51,19 @@ const registrarVenta = async (req, res) => {
         throw new Error("El carrito contiene productos inválidos");
       }
 
-      const [productoRows] = await connection.query(
-        "SELECT id_producto, descripcion, precio, stock FROM producto WHERE id_producto = ? FOR UPDATE",
+      const productoResult = await client.query(
+        `SELECT id_producto, descripcion, precio, stock 
+         FROM producto 
+         WHERE id_producto = $1 
+         FOR UPDATE`,
         [item.id_producto]
       );
 
-      if (productoRows.length === 0) {
+      if (productoResult.rows.length === 0) {
         throw new Error("Producto no encontrado");
       }
 
-      const producto = productoRows[0];
+      const producto = productoResult.rows[0];
 
       if (Number(producto.stock) < cantidad) {
         throw new Error(`Stock insuficiente para ${producto.descripcion}`);
@@ -64,6 +71,7 @@ const registrarVenta = async (req, res) => {
 
       const precioUnitario = Number(producto.precio);
       const subtotal = precioUnitario * cantidad;
+
       totalCalculado += subtotal;
 
       detalles.push({
@@ -74,10 +82,11 @@ const registrarVenta = async (req, res) => {
       });
     }
 
-    const [ventaResult] = await connection.query(
+    const ventaResult = await client.query(
       `INSERT INTO ventas
       (fecha, total, metodo_pago, estado_pago, id_cliente)
-      VALUES (NOW(), ?, ?, ?, ?)`,
+      VALUES (NOW(), $1, $2, $3, $4)
+      RETURNING id_venta`,
       [
         totalCalculado.toFixed(2),
         metodo_pago || "EFECTIVO",
@@ -86,13 +95,13 @@ const registrarVenta = async (req, res) => {
       ]
     );
 
-    const idVenta = ventaResult.insertId;
+    const idVenta = ventaResult.rows[0].id_venta;
 
     for (const detalle of detalles) {
-      await connection.query(
+      await client.query(
         `INSERT INTO detalle_venta
         (cantidad, precio_unitario, subtotal, id_producto, id_venta)
-        VALUES (?, ?, ?, ?, ?)`,
+        VALUES ($1, $2, $3, $4, $5)`,
         [
           detalle.cantidad,
           detalle.precio_unitario.toFixed(2),
@@ -102,13 +111,13 @@ const registrarVenta = async (req, res) => {
         ]
       );
 
-      await connection.query(
-        "UPDATE producto SET stock = stock - ? WHERE id_producto = ?",
+      await client.query(
+        "UPDATE producto SET stock = stock - $1 WHERE id_producto = $2",
         [detalle.cantidad, detalle.id_producto]
       );
     }
 
-    await connection.commit();
+    await client.query("COMMIT");
 
     res.json({
       ok: true,
@@ -116,15 +125,17 @@ const registrarVenta = async (req, res) => {
       idVenta,
       total: Number(totalCalculado.toFixed(2))
     });
+
   } catch (error) {
-    await connection.rollback();
+    await client.query("ROLLBACK");
 
     res.status(500).json({
       ok: false,
       msg: error.message || "Error al registrar venta"
     });
+
   } finally {
-    connection.release();
+    client.release();
   }
 };
 

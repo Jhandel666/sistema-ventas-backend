@@ -1,8 +1,7 @@
 const pool = require("../db");
 
 const listarProductos = async () => {
-
-  const [rows] = await pool.query(`
+  const result = await pool.query(`
     SELECT 
       p.id_producto,
       p.descripcion,
@@ -13,19 +12,19 @@ const listarProductos = async () => {
     FROM producto p
     LEFT JOIN categoria c
     ON p.id_categoria = c.id_categoria
+    ORDER BY p.id_producto ASC
   `);
 
-  return rows;
+  return result.rows;
 };
 
 const obtenerProducto = async (id) => {
-
-  const [rows] = await pool.query(
-    "SELECT * FROM producto WHERE id_producto = ?",
+  const result = await pool.query(
+    "SELECT * FROM producto WHERE id_producto = $1",
     [id]
   );
 
-  return rows[0];
+  return result.rows[0];
 };
 
 module.exports = {
