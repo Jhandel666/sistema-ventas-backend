@@ -110,6 +110,9 @@ const eliminarProducto = async (req, res) => {
 };
 
 module.exports = {
+  getProductos: listarProductos,
+  getProductoById: obtenerProducto,
+
   listarProductos,
   obtenerProducto,
   crearProducto,
