@@ -6,7 +6,7 @@ const registrarVenta = async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    const { cliente, carrito, metodo_pago } = req.body;
+    const { cliente, carrito } = req.body;
 
     if (!cliente || !Array.isArray(carrito) || carrito.length === 0) {
       await client.query("ROLLBACK");
@@ -52,9 +52,9 @@ const registrarVenta = async (req, res) => {
       }
 
       const productoResult = await client.query(
-        `SELECT id_producto, descripcion, precio, stock 
-         FROM producto 
-         WHERE id_producto = $1 
+        `SELECT id_producto, descripcion, precio, stock
+         FROM producto
+         WHERE id_producto = $1
          FOR UPDATE`,
         [item.id_producto]
       );
@@ -84,15 +84,10 @@ const registrarVenta = async (req, res) => {
 
     const ventaResult = await client.query(
       `INSERT INTO ventas
-      (fecha, total, metodo_pago, estado_pago, id_cliente)
-      VALUES (NOW(), $1, $2, $3, $4)
+      (fecha, total, id_cliente)
+      VALUES (NOW(), $1, $2)
       RETURNING id_venta`,
-      [
-        totalCalculado.toFixed(2),
-        metodo_pago || "EFECTIVO",
-        "PAGADO",
-        idCliente
-      ]
+      [totalCalculado.toFixed(2), idCliente]
     );
 
     const idVenta = ventaResult.rows[0].id_venta;
@@ -112,7 +107,9 @@ const registrarVenta = async (req, res) => {
       );
 
       await client.query(
-        "UPDATE producto SET stock = stock - $1 WHERE id_producto = $2",
+        `UPDATE producto
+         SET stock = stock - $1
+         WHERE id_producto = $2`,
         [detalle.cantidad, detalle.id_producto]
       );
     }
